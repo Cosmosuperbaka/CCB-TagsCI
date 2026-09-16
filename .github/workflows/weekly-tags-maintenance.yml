@@ -48,6 +48,26 @@ jobs:
       contents: write
     secrets: inherit
 
+  # 标签此时已经同时推到 CCB-TagsCI 的 outputs/ 与 guesser fork 的
+  # client/src/data/，直接通知 BakaGame 立刻重建本地 sqlite，
+  # 不必干等它自己的「北京时间周一 05:00」定时任务。
+  # 需要 CI_TOKEN 对 Cosmosuperbaka/BakaGame 有 repo 权限；派发失败会显红，
+  # 但不影响已推送的标签——BakaGame 的定时任务仍会兜底重建。
+  notify-bakagame:
+    name: Trigger BakaGame Data Rebuild
+    needs:
+      - merge-user-feedback
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Dispatch bangumi-tags-updated
+        env:
+          GH_TOKEN: ${{ secrets.CI_TOKEN }}
+        run: |
+          gh api --method POST repos/Cosmosuperbaka/BakaGame/dispatches \
+            -f event_type=bangumi-tags-updated
+
   open-upstream-pr:
     name: Open Upstream Pull Request
     needs:
