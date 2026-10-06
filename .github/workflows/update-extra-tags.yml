@@ -69,11 +69,11 @@ jobs:
           mkdir -p anime-character-guessr/client/public/data/extra_tags
           mkdir -p anime-character-guessr/client/public/assets/extra_tags
           
-          # 复制 JSON 配置文件
-          cp -r outputs/extra_tags/*.json anime-character-guessr/client/public/data/extra_tags/
+          # 同步 JSON 配置文件（同步覆盖并清理废弃项）
+          rsync -av --delete outputs/extra_tags/ anime-character-guessr/client/public/data/extra_tags/
           
-          # 复制静态图片资产
-          cp -r outputs/assets/extra_tags/* anime-character-guessr/client/public/assets/extra_tags/
+          # 同步静态图片资产（保持镜像一致，并自动删除主仓库中已被清理的废弃图片）
+          rsync -av --delete outputs/assets/extra_tags/ anime-character-guessr/client/public/assets/extra_tags/
 
       - name: Commit and Push to Guesser Repository
         working-directory: ./anime-character-guessr
