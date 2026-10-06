@@ -760,7 +760,8 @@
   "210065":{
     "标签":{
       "风":"<img src='/assets/extra_tags/380974/风.png'/>风",
-      "击破":"<img src='/assets/extra_tags/380974/击破.png'/>击破"
+      "击破":"<img src='/assets/extra_tags/380974/击破.png'/>击破",
+      "打击":"打击"
     },
     "阵营":{
       "罗斯凯利法·弗林特工坊":"<img src='/assets/extra_tags/380974/罗斯凯利法·弗林特工坊.png'/>罗斯凯利法·弗林特工坊"
