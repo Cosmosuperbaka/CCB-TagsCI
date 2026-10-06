@@ -222,7 +222,32 @@ def process_fgo():
     for name, s_list in wiki_servants.items():
         wiki_norm_map[normalize_brackets(name)] = s_list
 
-    # 4. 自动下载缺失的图片资产
+    # 4. 匹配 Bangumi 角色并筛选需要下载的素材
+    matched_servants_by_cid = {}
+    referenced_icons = set()
+    for cid, info in bgm_characters.items():
+        zh = info["chinese_name"]
+        ja = info["name"]
+        
+        matched_servants = None
+        for candidate in [zh, ja]:
+            if not candidate:
+                continue
+            norm_candidate = normalize_brackets(candidate)
+            if norm_candidate in wiki_norm_map:
+                matched_servants = wiki_norm_map[norm_candidate]
+                break
+                
+        if matched_servants:
+            matched_servants_by_cid[cid] = matched_servants
+            for s in matched_servants:
+                referenced_icons.add(f"{s['rarity']}.png")
+                referenced_icons.add(s["class_icon_file"])
+                referenced_icons.add(f"{s['np_card_type']}.png")
+                for align in s["alignments"]:
+                    referenced_icons.add(f"{align}.png")
+
+    # 自动下载缺失的图片资产
     from character_tags_crawler.utils.network import download_bwiki_missing_assets
     api_url = "https://fgo.wiki/api.php"
     headers = {
@@ -231,15 +256,6 @@ def process_fgo():
     }
     fgo_assets_dir = OUTPUT_ASSETS_DIR / FGO_ID
     
-    referenced_icons = set()
-    for name, s_list in wiki_servants.items():
-        for s in s_list:
-            referenced_icons.add(f"{s['rarity']}.png")
-            referenced_icons.add(s["class_icon_file"])
-            referenced_icons.add(f"{s['np_card_type']}.png")
-            for align in s["alignments"]:
-                referenced_icons.add(f"{align}.png")
-            
     missing_assets = {}
     for icon_name in referenced_icons:
         name = icon_name.rsplit(".", 1)[0]
@@ -273,54 +289,43 @@ def process_fgo():
         return np_type
 
     extra_tags = {}
-    for cid, info in bgm_characters.items():
+    for cid, matched_servants in matched_servants_by_cid.items():
+        info = bgm_characters[cid]
         zh = info["chinese_name"]
         ja = info["name"]
+        # 初始化属性归口容器
+        rarities_dict = {}
+        aligns_dict = {}
+        classes_dict = {}
+        np_dict = {}
         
-        matched_servants = None
-        for candidate in [zh, ja]:
-            if not candidate:
-                continue
-            norm_candidate = normalize_brackets(candidate)
-            if norm_candidate in wiki_norm_map:
-                matched_servants = wiki_norm_map[norm_candidate]
-                break
-                
-        # 同名或特定角色多职阶/多版本卡片属性合并处理 (例如：阿尔托莉雅有多职阶形态卡)
-        if matched_servants:
-            # 初始化属性归口容器
-            rarities_dict = {}
-            aligns_dict = {}
-            classes_dict = {}
-            np_dict = {}
+        for s in matched_servants:
+            # 稀有度
+            rarity = s["rarity"]
+            rarities_dict[rarity] = get_rarity_html(rarity)
             
-            for s in matched_servants:
-                # 稀有度
-                rarity = s["rarity"]
-                rarities_dict[rarity] = get_rarity_html(rarity)
+            # 秩序善恶与天地人星兽属性
+            for align in s["alignments"]:
+                aligns_dict[align] = align
                 
-                # 秩序善恶与天地人星兽属性
-                for align in s["alignments"]:
-                    aligns_dict[align] = align
-                    
-                # 职阶 (如 Saber)
-                class_link = s["class_link"]
-                class_icon_file = s["class_icon_file"]
-                classes_dict[class_link] = get_class_html(class_link, class_icon_file)
-                
-                # 宝具
-                np_card_type = s["np_card_type"]
-                np_type = s["np_type"]
-                np_name = f"{np_card_type}{np_type}"
-                np_dict[np_name] = get_np_html(np_card_type, np_type)
-                
-            extra_tags[cid] = {
-                "_name": zh or ja,
-                "稀有度": rarities_dict,
-                "属性": aligns_dict,
-                "职阶": classes_dict,
-                "宝具": np_dict
-            }
+            # 职阶 (如 Saber)
+            class_link = s["class_link"]
+            class_icon_file = s["class_icon_file"]
+            classes_dict[class_link] = get_class_html(class_link, class_icon_file)
+            
+            # 宝具
+            np_card_type = s["np_card_type"]
+            np_type = s["np_type"]
+            np_name = f"{np_card_type}{np_type}"
+            np_dict[np_name] = get_np_html(np_card_type, np_type)
+            
+        extra_tags[cid] = {
+            "_name": zh or ja,
+            "稀有度": rarities_dict,
+            "属性": aligns_dict,
+            "职阶": classes_dict,
+            "宝具": np_dict
+        }
 
     # 5. 生成 JSON 输出文件
     OUTPUT_JSON_DIR.mkdir(parents=True, exist_ok=True)

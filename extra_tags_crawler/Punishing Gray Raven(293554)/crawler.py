@@ -176,7 +176,51 @@ def process_pns():
         n = re.sub(r'[^\w\u4e00-\u9fa5]', '', n)
         return n
 
-    # 3. 自动下载缺失的图片资产 (提前执行，以便在生成 HTML 标签时检查文件是否存在)
+    # 3. 匹配 Bangumi 角色并筛选需要下载的素材
+    matched_chars_by_cid = {}
+    for cid, info in bgm_characters.items():
+        bgm_name = info["name"]
+        bgm_zh = info["chinese_name"]
+        
+        matched_char = None
+        for candidate in [bgm_zh, bgm_name]:
+            if not candidate:
+                continue
+            
+            # 直接匹配
+            if candidate in wiki_chars:
+                matched_char = wiki_chars[candidate]
+                break
+                
+            norm_candidate = normalize_name(candidate)
+            # 遍历 Bwiki
+            for w_name, data in wiki_chars.items():
+                w_name_norm = normalize_name(w_name)
+                # 检查归一化后是否相等，或者子串
+                if norm_candidate == w_name_norm or w_name in candidate or candidate in w_name:
+                    matched_char = data
+                    break
+                # 别名映射
+                aliases = ALIAS_MAP.get(w_name, [w_name])
+                if isinstance(aliases, str):
+                    aliases = [aliases]
+                matched_alias = False
+                for alias in aliases:
+                    alias_norm = normalize_name(alias)
+                    if norm_candidate == alias_norm or alias_norm in norm_candidate or norm_candidate in alias_norm:
+                        matched_char = data
+                        matched_alias = True
+                        break
+                if matched_alias:
+                    break
+            
+            if matched_char:
+                break
+
+        if matched_char:
+            matched_chars_by_cid[cid] = matched_char
+
+    # 4. 自动下载缺失的图片资产 (仅限已匹配角色的引用)
     pns_assets_dir = OUTPUT_ASSETS_DIR / PNS_ID
     pns_assets_dir.mkdir(parents=True, exist_ok=True)
     
@@ -188,7 +232,7 @@ def process_pns():
     }
     
     referenced_icons = set()
-    for char_info in wiki_chars.values():
+    for char_info in matched_chars_by_cid.values():
         for r in char_info["rarities"]:
             referenced_icons.add(f"{r}.png")
         for p in char_info["professions"]:
@@ -243,88 +287,48 @@ def process_pns():
             return f"<img src='/assets/extra_tags/{PNS_ID}/{r}.svg' alt='{r}' />"
         return r
 
-    # 4. 匹配 Bangumi 角色并生成规范的字典
+    # 5. 生成规范的字典
     extra_tags = {}
-    
-    for cid, info in bgm_characters.items():
-        bgm_name = info["name"]
-        bgm_zh = info["chinese_name"]
-        
-        matched_char = None
-        for candidate in [bgm_zh, bgm_name]:
-            if not candidate:
-                continue
-            
-            # 直接匹配
-            if candidate in wiki_chars:
-                matched_char = wiki_chars[candidate]
-                break
+    for cid, matched_char in matched_chars_by_cid.items():
+        rarities = matched_char["rarities"]
+        professions = matched_char["professions"]
+        weapons = matched_char["weapons"]
+        elements = matched_char["elements"]
+        factions = matched_char["factions"]
+        effect_tags = matched_char["effect_tags"]
+
+        # 1. 稀有度
+        rarity_dict = {}
+        for r in sorted(rarities):
+            rarity_dict[r] = get_rarity_html(r)
+
+        # 2. 标签：机体类型、能量参数、效应标签
+        tags_dict = {}
+        for p in professions:
+            tags_dict[p] = get_tag_html(p)
                 
-            norm_candidate = normalize_name(candidate)
-            # 遍历 Bwiki
-            for w_name, data in wiki_chars.items():
-                w_name_norm = normalize_name(w_name)
-                # 检查归一化后是否相等，或者子串
-                if norm_candidate == w_name_norm or w_name in candidate or candidate in w_name:
-                    matched_char = data
-                    break
-                # 别名映射
-                aliases = ALIAS_MAP.get(w_name, [w_name])
-                if isinstance(aliases, str):
-                    aliases = [aliases]
-                matched_alias = False
-                for alias in aliases:
-                    alias_norm = normalize_name(alias)
-                    if norm_candidate == alias_norm or alias_norm in norm_candidate or norm_candidate in alias_norm:
-                        matched_char = data
-                        matched_alias = True
-                        break
-                if matched_alias:
-                    break
-            
-            if matched_char:
-                break
+        for e in elements:
+            tags_dict[e] = get_tag_html(e)
+                
+        for t in effect_tags:
+            tags_dict[t] = get_tag_html(t)
 
-        if matched_char:
-            rarities = matched_char["rarities"]
-            professions = matched_char["professions"]
-            weapons = matched_char["weapons"]
-            elements = matched_char["elements"]
-            factions = matched_char["factions"]
-            effect_tags = matched_char["effect_tags"]
+        # 3. 武器
+        weapon_dict = {}
+        for w in weapons:
+            weapon_dict[w] = get_tag_html(w)
 
-            # 1. 稀有度
-            rarity_dict = {}
-            for r in sorted(rarities):
-                rarity_dict[r] = get_rarity_html(r)
+        # 4. 所属/阵营
+        faction_dict = {}
+        for f in factions:
+            faction_dict[f] = get_tag_html(f)
 
-            # 2. 标签：机体类型、能量参数、效应标签
-            tags_dict = {}
-            for p in professions:
-                tags_dict[p] = get_tag_html(p)
-                    
-            for e in elements:
-                tags_dict[e] = get_tag_html(e)
-                    
-            for t in effect_tags:
-                tags_dict[t] = get_tag_html(t)
-
-            # 3. 武器
-            weapon_dict = {}
-            for w in weapons:
-                weapon_dict[w] = get_tag_html(w)
-
-            # 4. 所属/阵营
-            faction_dict = {}
-            for f in factions:
-                faction_dict[f] = get_tag_html(f)
-
-            extra_tags[cid] = {
-                "稀有度": rarity_dict,
-                "武器类型": weapon_dict,
-                "标签": tags_dict,
-                "阵营": faction_dict
-            }
+        extra_tags[cid] = {
+            "稀有度": rarity_dict,
+            "武器类型": weapon_dict,
+            "标签": tags_dict,
+            "阵营": faction_dict
+        }
 
     # 5. 保存 JSON 输出
     OUTPUT_JSON_DIR.mkdir(parents=True, exist_ok=True)
