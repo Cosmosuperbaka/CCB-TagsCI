@@ -1,7 +1,9 @@
 import os
 import json
+import hashlib
 import logging
-from typing import Dict, List, Any, Tuple
+import datetime
+from typing import Dict, List, Any, Tuple, Optional
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -533,6 +535,18 @@ class UserTagProcessor:
 
             merged_tags[bgmid] = optimized
 
+        # ---- 增量基线：在覆盖之前读上一版产物 ----
+        # BakaGame 侧据此增量更新角色标签，不必因为一个标签变了就重建整个数据集。
+        previous_tags: Dict[str, List[str]] = {}
+        previous_sha = None
+        if os.path.exists(output_js_path):
+            with open(output_js_path, 'rb') as f:
+                previous_sha = hashlib.sha256(f.read()).hexdigest()
+            previous_tags = self.parse_js_id_tags(output_js_path)
+            logger.info(f"增量基线：上一版 {len(previous_tags)} 个角色（sha256 {previous_sha[:12]}）")
+        else:
+            logger.info("增量基线：无上一版产物，本次 diff 会包含全部角色")
+
         # Ensure output directory exists
         os.makedirs(os.path.dirname(os.path.abspath(output_js_path)), exist_ok=True)
 
@@ -545,5 +559,38 @@ class UserTagProcessor:
             tags_js_lines.sort(key=lambda x: int(x[0]))
             f.write(',\n'.join(map(lambda x: str(x[0]) + x[1], tags_js_lines)))
             f.write('\n};')
-        
+
+        self._write_diff(previous_tags, previous_sha, merged_tags, output_js_path)
         logger.info("Merging and optimization completed successfully.")
+
+    def _write_diff(self, previous_tags: Dict[str, List[str]], previous_sha: Optional[str],
+                    merged_tags: Dict[str, List[str]], output_js_path: str) -> None:
+        """输出 `id_tags.diff.json`：只含相对上一版有变化的角色。
+
+        BakaGame 的应用方要拿 `baseSha256` 与自己记录的版本比对：不一致说明中间漏了几轮，
+        此时不能应用（会漏掉变更），应回退到拉全量。`removed` 是上一版有、这一版没有的角色。
+        """
+        with open(output_js_path, 'rb') as f:
+            target_sha = hashlib.sha256(f.read()).hexdigest()
+
+        added = {k: v for k, v in merged_tags.items() if k not in previous_tags}
+        changed = {k: v for k, v in merged_tags.items()
+                   if k in previous_tags and previous_tags[k] != v}
+        removed = [k for k in previous_tags if k not in merged_tags]
+
+        diff_path = os.path.join(os.path.dirname(os.path.abspath(output_js_path)), 'id_tags.diff.json')
+        payload = {
+            'generatedAt': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'baseSha256': previous_sha,
+            'targetSha256': target_sha,
+            'counts': {'total': len(merged_tags), 'added': len(added),
+                       'changed': len(changed), 'removed': len(removed)},
+            'added': added,
+            'changed': changed,
+            'removed': removed,
+        }
+        # 不缩进：diff 会被后端定期拉取，省下的字节比可读性值钱。
+        with open(diff_path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, separators=(',', ':'))
+        logger.info(f"增量：新增 {len(added)} / 变更 {len(changed)} / 移除 {len(removed)}"
+                    f"（共 {len(merged_tags)} 角色）-> {diff_path}")
